@@ -1,21 +1,10 @@
 install.packages("tidyverse")
-install.packages("dplyr")
-install.packages("plotly")
-install.packages("listviewer")
-install.packages("ggplot2")
 install.packages("vegan")
-install.packages("geonames")
 install.packages("foreach")
 library(foreach)
 library (tidyverse)
-library(dplyr)
-library(plotly)
-library(listviewer)
-library(ggplot2)
-library(tidyr)
 library(vegan)
-library(geonames)
-library(data.table)
+
 
 #Installing the package Biostring for manipulation of nucleotide sequences 
 
@@ -27,23 +16,34 @@ BiocManager::install("Biostrings")
 library(Biostrings)
 
 ################
-#Data exploration
+#Data exploration. Reading the data. Set the working directory to where the data is saved.  
 
-#Retrieving records for the families Ichneumonidae and Braconidae from the BOLD repository using the API tool on October 2021.
+data_bold <- read_delim("Copy of Dirk_Hym_20231116.txt")
+names(data_bold)
 
-#Ichneumonidae <- read_tsv("http://www.boldsystems.org/index.php/API_Public/combined?taxon=Ichneumonidae&format=tsv")
+#Filtering for lat/long presence. We need all the records to have this information
 
-#write_tsv(Ichneumonidae, "Ichneumonidae_BOLD_data.tsv")
+data_bold <- data_bold %>%
+  filter(!is.na(lat) & !is.na(long))
 
-Ichneumonidae <- read_tsv("Ichneumonidae_BOLD_data_October2021.tsv")
+sum(is.na(data_bold$long))
 
-#Braconidae_oct27 <- read_tsv("http://www.boldsystems.org/index.php/API_Public/combined?taxon=Braconidae&format=tsv")
+#To this point there are 661 635 records for Ichneumonidae, Braconidae and Formicidae. 
 
-#write_tsv(Braconidae_oct, "Braconidae_BOLD_data_October2021.tsv")
+#Creating a separate file for each family 
 
-Braconidae <- read_tsv("Braconidae_BOLD_data_October2021.tsv")
+unique(data_bold$family)
 
-#parasitoids <- full_join(Ichneumonidae, Braconidae)
+ichneumonidae <- data_bold %>%
+  filter(family == "Ichneumonidae")
+
+braconidae <- data_bold %>%
+  filter(family == "Braconidae")
+
+formicidae <- data_bold %>%
+  filter(family == "Formicidae" )
+
+parasitoids <- full_join(ichneumonidae, braconidae)
 
 #Creating generic variable to make script reproducible. Just changing the input file it can be run completely. 
 
