@@ -4,7 +4,10 @@ install.packages("foreach")
 library(foreach)
 library (tidyverse)
 library(vegan)
-
+library(devtools) 
+devtools::install_github("CNuge/coil", build_vignettes = TRUE)
+library(coil)
+library(parallel)
 
 #Installing the package Biostring for manipulation of nucleotide sequences 
 
@@ -41,11 +44,11 @@ braconidae <- data_bold %>%
   filter(family == "Braconidae")
 
 formicidae <- data_bold %>%
-  filter(family == "Formicidae" )
+  filter(family == "Formicidae")
 
 parasitoids <- full_join(ichneumonidae, braconidae)
 
-#Creating generic variable to make script reproducible. Just changing the input file it can be run completely. 
+#Creating generic variable to make script reproducible. Just changing the input file it can run completely. 
 
 data <- parasitoids
 
@@ -53,154 +56,85 @@ data <- parasitoids
 
 #Determining the number of records missing BIN and filtering those records. The file is now called Ichneumonidae_BIN because it has all the records bearing BINs. 
 
-sum(is.na(data$bin_uri))
+sum(is.na(data$GUID))
 
 data_BIN <- data %>%
-  filter(!is.na(bin_uri))
+  filter(!is.na(GUID))
 
-#Checking how many unique BINs are present in the data set as this will be used as a proxy for species.
+#Checking how many unique BINs are present in the data set as this will be used as a proxy for species. There are 43093 BINs
 
-length(unique(data_BIN$bin_uri))
+length(unique(data_BIN$GUID))
 
 #Determining the number of records missing a sequence (0, all the records have a nucleotide sequence)
 
-sum(is.na(data_BIN$nucleotides))
+sum(is.na(data_BIN$nucraw))
 
-#Exploring the molecular markers present in the data set
+#Removing records missing nucleotide sequence 
 
-unique(data_BIN$markercode)
+data_BIN <- data_BIN %>%
+  filter(!is.na(nucraw))
 
-#Determining the number of sequences per molecular marker
-
-Seq_Marker <- data_BIN %>%
-  group_by(markercode) %>%
-  summarize(n= length(processid)) %>%
-  arrange(desc(n))
-
-#rm(Seq_Marker)
-
-#In this point I am going to keep a subset of the data that has the molecular marker COI-5P that are the majority.
-
-data_COI5P <- data_BIN %>%
-  filter(markercode == "COI-5P")
-
-#Checking step
-unique(data_COI5P$markercode)
-
-#Determining the number of records missing geographic information
-
-sum(is.na(data_COI5P$lat))
-
-sum(is.na(data_COI5P$lon))
-
-#Filtering the records without the geographic information. 
-
-data_geo <- data_COI5P %>%
-  filter (!is.na(data_COI5P$lat))
 
 ############
-#Determining the sequence length and adding a column to the dataframe with the values.
-
-sum(str_detect(data_geo$nucleotides, regex("[ATCG]")))
-class(data_geo$nucleotides)
-
-data_geo <- data_geo %>%
-  mutate(Sequence_Length = str_count(data_geo$nucleotides))
-
-max(data_geo$Sequence_Length)
-min(data_geo$Sequence_Length)
+#Exploring the distribution of sequence length 
+max(data_BIN$nucraw_length)
+min(data_BIN$nucraw_length)
 
 #Histogram to visualize the distribution of the sequence length
 
-ggplot(data = data_geo)+
-  geom_histogram(mapping = aes(x = Sequence_Length), color = "black", alpha = 0.2, binwidth = 10)+
+ggplot(data = data_BIN)+
+  geom_histogram(mapping = aes(x = nucraw_length), color = "black", alpha = 0.2, binwidth = 10)+
   labs(x = "Nucleotide Sequence Length", y = "Frequency", title = "Frequency Histogram")
+
+#Filtering by sequence length. Removing sequences too short and too long. Keeping all the sequences between 500 to 700 nucleotides. 
+
+data_BIN <- data_BIN %>%
+  filter (nucraw_length >= 500 & nucraw_length <= 700)
 
 #For the analysis of Nucleotide Diversity I need to filter all the records that have 1 sequence per BIN. 
 
-data_df_GD <- data_geo %>%
-  group_by(bin_uri) %>%
+data_GD <- data_BIN %>%
+  group_by(GUID) %>%
   filter(length(processid) != 1)
 
-#Exploring a bar plot representation of the number of BINs per country. 
+#We have 334123 records for parasitoids that have more than one sequences per BIN.
 
-data_country <- data_df_GD %>%
-  group_by(country) %>%
-  summarize(count = length(unique(bin_uri)))
+# Determining the number of sequences per BIN and summarizing that into a table
 
-png('bins_country.png', width = 7, height = 7, units = 'in', res = 400, bg = 'transparent')
-
-BIN_Country <- ggplot(data = data_country)+
-  geom_bar(mapping = aes(x = country, y = count), stat = 'identity')+
-  labs(x = "Country", y = "BIN count", title = "Number of BINs per Country")+
-  coord_flip()
-
-plot(BIN_Country)
-dev.off()
-
-
-png('bins_country_noCCR.png', width = 7, height = 7, units = 'in', res = 400, bg = 'transparent')
-
-# Determining the number of sequences per BIN
-
-Sequences_bin <- data_df_GD %>%
-  group_by(bin_uri) %>%
+Sequences_bin <- data_GD %>%
+  group_by(GUID) %>%
   summarize(count = length(processid))
 
-png('seq_per_bin.png', width = 7, height = 7, units = 'in', res = 400, bg = 'transparent')
-
-seq_per_bin <- ggplot(data = Sequences_bin)+
-  geom_histogram(mapping = aes(x = count), color = "black", alpha = 0.2, binwidth = 50)+
-labs(x = "Number of Sequences per BIN", y = "Frequency", title = "Frequency Histogram of the Number of Sequences per BIN")
-
-plot(seq_per_bin)
-dev.off()
-
-############
-#Exploring parameter of the final dataset.
-
-length(unique(data_df_GD$bin_uri))
-sum(Sequences_bin$count == 1)
-
-#Reorganization of the dataframe
-
-data_df_GD <- data_df_GD [, c("recordID","bin_uri","phylum_taxID", "country","phylum_name","class_taxID","class_name","order_taxID","order_name","family_taxID","family_name","subfamily_taxID", "subfamily_name","genus_taxID","genus_name", "species_taxID","species_name","nucleotides","lat","lon")]
-
-#write_tsv(data_df_GD, "data_df_GD_june2021_2.tsv")
+#writing filtered data to file. 
+write_tsv(data_GD, "data_GD_NOV_2023.tsv")
 
 ############
 #The next step is to check the quality of the nucleotide sequences before the alignment. The R package coil contains functions for placing COI-5P barcode sequences into a common reading frame, translating DNA sequences to amino acids and for assessing the likelihood that a given barcode sequence includes an insertion or deletion error.
 
-install.packages("coil")
-install.packages("parallel")
 
-library(devtools) 
-devtools::install_github("CNuge/coil", build_vignettes = TRUE)
-library(coil)
-library(parallel)
-vignette("coil-vignette")
+#Some records have non-IUPAC symbols WYSRDV in the nucleotide sequences (here some authors suggest removing the sequences but we decided to place an N. If this character is generating any problem in the sequence the open reading frame will be shifted and filtered by coil). I further investigated those sequences as this character is not accepted to run coil.
 
-# After running coil the first time, I found that some records had non-IUPAC symbols WYSRDV in the nucleotide sequences (here some authors suggest removing the sequences but we decided to place an N. If this character is generating any problem in the sequence the open reading frame will be shifted and filtered by coil). I further investigated those sequences as this character is not accepted to run coil.
+length(grep(data_GD$nucraw, pattern = "[Y, S, R, D, V, K, M, H, W, y, s, r, d, v, k, m, h, w]\\d+"))
 
- grep(data_df_GD$nucleotides, pattern = "[Y, S, R, D, V, K, M, H, W]")
+seq_error3 <- vector('list')
 
-for (i in seq_along(data_df_GD$nucleotides[])){
-  data_df_GD$nucleotides[i] <- gsub(pattern = "[Y, S, R, D, V, K, M, H, W]", replacement = "N", data_df_GD$nucleotides[i])
+for (i in 1:length(data_GD$nucraw)) {
+  ind <- grep(data_GD$nucraw, pattern = "[y, s, r, d, v, k, m, h, w]")
+  seq_error3 <- data_GD[ind,]
 }
- 
-#Checking step
- data_df_GD$nucleotides[2206]
 
-look_noIUPAC <- matrix()
-for (i in seq_along(data_df_GD$nucleotides[])){
-  look_noIUPAC[i] <- str_extract_all(data_df_GD$nucleotides[i], pattern = "[^ A,T, C, G, -, N]")
-  
-}
-unique(look_noIUPAC)
+#seq_error2 <- seq_error [[1]]
+
+seq_error2$nucraw[[2]]
+
+#Removing sequences. There are 549 with problems 
+
+data_GD <- data_GD %>% 
+  filter(!processid %in% seq_error3$processid)
 
 #Code to run coil after removing problematic characters.
 
-data_df_GD$recordID <- as.character(data_df_GD$recordID)
+data_GD$processid <- as.character(data_GD$processid)
 
 genetic_code_coil <- which_trans_table("Ichneumonidae")
 
@@ -209,9 +143,9 @@ full_coi5p_df = data.frame(matrix(ncol = 9, nrow = 0),stringsAsFactors = FALSE)
 colnames(full_coi5p_df) = c("name", "raw", "framed", "was_trimmed", "align_report", "aaSeq", "aaScore", "indel_likely", "stop_codons")
 
 
-output_data_all = parallel::mclapply(1:length(data_df_GD$recordID), function(i){
-  coi5p_pipe(data_df_GD$nucleotides[i], 
-             name = data_df_GD$recordID[i], 
+output_data_all = parallel::mclapply(1:length(data_GD$processid), function(i){
+  coi5p_pipe(data_GD$nucraw[i], 
+             name = data_GD$processid[i], 
              trans_table = genetic_code_coil, 
              triple_translate = TRUE)}, mc.cores = 5 )
 
